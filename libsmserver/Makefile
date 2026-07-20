@@ -2,7 +2,7 @@ ARCHS = arm64 arm64e
 
 PREFIX=$(THEOS)/toolchain/XcodeDefault.xctoolchain/usr/bin/
 
-TARGET := iphone:clang:12.2
+TARGET := iphone:clang:18.0
 INSTALL_TARGET_PROCESSES = MobileSMS, SpringBoard
 
 GO_EASY_ON_ME = 1
@@ -19,7 +19,7 @@ libsmserver_LDFLAGS = -L$(THEOS)/lib
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
-SYSROOT = $(THEOS)/sdks/iPhoneOS12.2.sdk
+SYSROOT = $(THEOS)/sdks/iPhoneOS18.0.sdk
 
 internal-stage::
 	mkdir -p lib
