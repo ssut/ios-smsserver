@@ -22,6 +22,12 @@
 
 - (instancetype)init {
 	if ((self = [super init])) {
+		// Initialize blocks to empty stubs so MRYIPC never invokes a nil block
+		_setTexts = ^(NSString *guid) {};
+		_setTyping = ^(NSDictionary *vals) {};
+		_sentTapback = ^(int tapback, NSString *guid) {};
+		_textRead = ^(NSString *guid) {};
+
 		_center = [MRYIPCCenter centerNamed:@"com.ianwelker.smserverHandleText"];
 
 		// have to try catch this 'cause libmryipc throws an exception when the port is already in use,
@@ -95,43 +101,63 @@
 }
 
 - (BOOL)sendIPCText:(NSString *)body withSubject:(NSString *)subject toAddress:(NSString *)address withAttachments:(NSArray *)paths {
-	NSDictionary* args = @{@"body": body, @"subject": subject, @"address": address, @"attachment": paths};
-	return [self.center callExternalMethod:@selector(sendText:) withArguments:args];
+	@try {
+		NSDictionary* args = @{@"body": body, @"subject": subject, @"address": address, @"attachment": paths};
+		return [[self.center callExternalMethod:@selector(sendText:) withArguments:args] boolValue];
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: sendIPCText exception: %@", e);
+		return NO;
+	}
 }
 
 - (BOOL)markConvoAsRead:(NSString *)chat_id {
-	NSArray* chats = [chat_id componentsSeparatedByString:@","]; /// To allow marking multiple convos as read
-	for (NSString* chat in chats) {
-		if (![[self.center callExternalMethod:@selector(setAllAsRead:) withArguments:chat] boolValue])
-			return NO;
+	@try {
+		NSArray* chats = [chat_id componentsSeparatedByString:@","]; /// To allow marking multiple convos as read
+		for (NSString* chat in chats) {
+			if (![[self.center callExternalMethod:@selector(setAllAsRead:) withArguments:chat] boolValue])
+				return NO;
+		}
+		return YES;
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: markConvoAsRead exception: %@", e);
+		return NO;
 	}
-	return YES;
 }
 
 - (BOOL)sendTapback:(NSNumber *)tapback forGuid:(NSString *)guid inChat:(NSString *)chat {
-	NSDictionary* args = @{@"tapback": tapback, @"guid": guid, @"chat": chat};
-	return [self.center callExternalMethod:@selector(sendTapback:) withArguments:args];
+	@try {
+		NSDictionary* args = @{@"tapback": tapback, @"guid": guid, @"chat": chat};
+		return [[self.center callExternalMethod:@selector(sendTapback:) withArguments:args] boolValue];
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: sendTapback exception: %@", e);
+		return NO;
+	}
 }
 
 - (void)sendTyping:(BOOL)isTyping forChat:(NSString *)chat {
-	NSBundle* imcore = [[NSBundle alloc] initWithPath:@"/System/Library/PrivateFrameworks/IMCore.framework"];
-	[imcore load];
+	@try {
+		NSBundle* imcore = [[NSBundle alloc] initWithPath:@"/System/Library/PrivateFrameworks/IMCore.framework"];
+		[imcore load];
 
-	//CKConversationList* sharedList = [c(CKConversationList) sharedConversationList];
-	IMChatRegistry* registry = [c(IMChatRegistry) sharedInstance];
-	//CKConversation* convo = [sharedList conversationForExistingChatWithGroupID:chat];
-	IMChat* imchat = [registry existingChatWithChatIdentifier:chat];
+		IMChatRegistry* registry = [c(IMChatRegistry) sharedInstance];
+		IMChat* imchat = [registry existingChatWithChatIdentifier:chat];
 
-	//[convo setLocalUserIsTyping:isTyping];
-	[imchat setLocalUserIsTyping:isTyping];
+		[imchat setLocalUserIsTyping:isTyping];
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: sendTyping exception: %@", e);
+	}
 }
 
 - (BOOL)removeObject:(NSString *)chat text:(NSString *)text {
-	NSMutableDictionary* args = [NSMutableDictionary dictionaryWithObject:chat forKey:@"chat"];
-	if (text != nil)
-		args[@"text"] = text;
-
-	return [self.center callExternalMethod:@selector(delete:) withArguments:[NSDictionary dictionaryWithDictionary:args]];
+	@try {
+		NSMutableDictionary* args = [NSMutableDictionary dictionaryWithObject:chat forKey:@"chat"];
+		if (text != nil)
+			args[@"text"] = text;
+		return [[self.center callExternalMethod:@selector(delete:) withArguments:[NSDictionary dictionaryWithDictionary:args]] boolValue];
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: removeObject exception: %@", e);
+		return NO;
+	}
 }
 
 /// This is not being used, but I am leaving it here for future versions in case I figure out how to make it work well.
@@ -160,4 +186,3 @@
 }*/
 
 @end
-
