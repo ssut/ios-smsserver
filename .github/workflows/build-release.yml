@@ -69,7 +69,7 @@ jobs:
           export THEOS_MAKE_PATH=/home/runner/theos/makefiles
           export PATH="/home/runner/theos/bin:$PATH"
           VERSION="${GITHUB_REF_NAME#v}"
-          [ -z "$VERSION" ] && VERSION=$(grep '^Version:' libsmserver/control | awk '{print $2}')
+          echo "$VERSION" | grep -q '^[0-9]' || VERSION=$(grep '^Version:' libsmserver/control | awk '{print $2}')
           cd libsmserver
           make package \
             THEOS=/home/runner/theos \
@@ -173,7 +173,7 @@ jobs:
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
           DEB=package/app_deb
           VERSION="${GITHUB_REF_NAME#v}"
-          [ -z "$VERSION" ] && VERSION=$(grep '^Version:' package/DEBIAN/control | awk '{print $2}')
+          echo "$VERSION" | grep -q '^[0-9]' || VERSION=$(grep '^Version:' package/DEBIAN/control | awk '{print $2}')
 
           sed -i '' "s/^Version:.*/Version: ${VERSION}/" package/DEBIAN/control
 
