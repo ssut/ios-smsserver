@@ -13,6 +13,7 @@ jobs:
 
     env:
       THEOS: /home/runner/theos
+      MRYIPC_SHA: 77ea5ede76ef7a8b462d9661aeaef7e15f2dfa8c
 
     steps:
       - name: Checkout
@@ -55,11 +56,15 @@ jobs:
 
       - name: Install libMRYIPC
         run: |
-          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
+          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/MRYIPCCenter.h" \
             -o $THEOS/include/MRYIPCCenter.h
+          echo "110cbf88744028bdc41cb4e603370440fa49c6a1eaf0a403c538476b1a0a2d8e  $THEOS/include/MRYIPCCenter.h" | sha256sum -c
+
           mkdir -p $THEOS/lib/iphone/rootless
-          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
+          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/usr/lib/libmryipc.dylib" \
             -o $THEOS/lib/libmryipc.dylib
+          echo "e1f2412e48cc72cc3754fbf751f176a105be8de386debb34a6b4fbca63700b26  $THEOS/lib/libmryipc.dylib" | sha256sum -c
+
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
 
@@ -97,6 +102,9 @@ jobs:
   build-app:
     name: Build SMServer app deb
     runs-on: macos-14
+
+    env:
+      MRYIPC_SHA: 77ea5ede76ef7a8b462d9661aeaef7e15f2dfa8c
 
     steps:
       - name: Checkout
@@ -167,9 +175,10 @@ jobs:
         run: |
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
 
-          # Download the correct libmryipc (same as what the tweak uses)
-          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
+          # Download the correct libmryipc (same pinned SHA as the tweak uses)
+          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/usr/lib/libmryipc.dylib" \
             -o /tmp/libmryipc.dylib
+          echo "e1f2412e48cc72cc3754fbf751f176a105be8de386debb34a6b4fbca63700b26  /tmp/libmryipc.dylib" | shasum -a 256 -c
 
           # Extract arm64 slice (the app is arm64 only)
           lipo /tmp/libmryipc.dylib -thin arm64 -output "${APP}/Frameworks/libmryipc.dylib"
