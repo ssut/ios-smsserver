@@ -22,7 +22,7 @@
 
 - (instancetype)init {
 	if ((self = [super init])) {
-		// Initialize blocks to empty stubs so MRYIPC never invokes a nil block
+		// Initialize blocks to empty stubs so they can be safely called
 		_setTexts = ^(NSString *guid) {};
 		_setTyping = ^(NSDictionary *vals) {};
 		_sentTapback = ^(int tapback, NSString *guid) {};
@@ -30,29 +30,16 @@
 
 		_center = [MRYIPCCenter centerNamed:@"com.ianwelker.smserverHandleText"];
 
-		// have to try catch this 'cause libmryipc throws an exception when the port is already in use,
-		// which occurs when we already have SMServer running in the background.
-		@try {
-			[_center addTarget:self action:@selector(handleReceivedTextWithCallback:)];
-			[_center addTarget:self action:@selector(handlePartyTypingWithCallback:)];
-			[_center addTarget:self action:@selector(handleSentTapbackWithCallback:)];
-			[_center addTarget:self action:@selector(handleTextReadWithCallback:)];
-		}
-		@catch (id exc) {
-			NSString* log = [NSString stringWithFormat:@"\e[93;1mWARNING:\e[0m Failed to add selector for MRYIPCCenter: %@", exc];
-			if ([[NSProcessInfo processInfo] arguments].count > 0)
-				printf("%s\n", [log UTF8String]);
-			else
-				NSLog(@"SMServer_app: %@", log);
-			return nil;
-		}
+		// NOTE: addTarget: calls are intentionally disabled to prevent MRYIPC
+		// from starting its Mach message loop, which throws uncaught NSExceptions
+		// on iOS 15 rootless causing SIGABRT. Real-time push notifications from
+		// the tweak are disabled; all other functionality (web UI, API, DB reads,
+		// message sending via IWSSender) continues to work.
 	}
 	return self;
 }
 
 - (void)handleReceivedTextWithCallback:(NSString *)guid {
-	/// This is the function that is called when a new text is received, or you send a text through SMServer.
-	/// _setTexts is a block that is set somewhere around line 38 in `ServerDelegate.swift`, in `loadFuncs()`.
 	@try {
 		if (_setTexts) _setTexts(guid);
 	} @catch (NSException *e) {
@@ -61,8 +48,6 @@
 }
 
 - (void)handlePartyTypingWithCallback:(NSDictionary *)vals {
-	/// This is called when someone else starts typing
-	/// `_setTyping` is a block that is set somewhere around line 42 in `ServerDelegate.swift`, in `loadFuncs()`.
 	@try {
 		if (_setTyping) _setTyping(vals);
 	} @catch (NSException *e) {
@@ -71,8 +56,6 @@
 }
 
 - (void)handleSentTapbackWithCallback:(NSDictionary *)vals {
-	/// This is called when you send a reaction through SMServer
-	/// _sentTapback is a block that is set somewhere around line 46 in `ServerDelegate.swift`, in loadFuncs().
 	@try {
 		if (_sentTapback) _sentTapback([[vals objectForKey:@"tapback"] intValue], [vals objectForKey:@"guid"]);
 	} @catch (NSException *e) {
@@ -95,7 +78,6 @@
 - (id)init {
 	if (self = [super init]) {
 		self.center = [MRYIPCCenter centerNamed:@"com.ianwelker.smserver"];
-		/// TODO: Find a way to add an NSNotificationCenter observer for the name "__kIMChatRegistryMessageSentNotification"
 	}
 	return self;
 }
@@ -112,7 +94,7 @@
 
 - (BOOL)markConvoAsRead:(NSString *)chat_id {
 	@try {
-		NSArray* chats = [chat_id componentsSeparatedByString:@","]; /// To allow marking multiple convos as read
+		NSArray* chats = [chat_id componentsSeparatedByString:@","];
 		for (NSString* chat in chats) {
 			if (![[self.center callExternalMethod:@selector(setAllAsRead:) withArguments:chat] boolValue])
 				return NO;
@@ -138,10 +120,8 @@
 	@try {
 		NSBundle* imcore = [[NSBundle alloc] initWithPath:@"/System/Library/PrivateFrameworks/IMCore.framework"];
 		[imcore load];
-
 		IMChatRegistry* registry = [c(IMChatRegistry) sharedInstance];
 		IMChat* imchat = [registry existingChatWithChatIdentifier:chat];
-
 		[imchat setLocalUserIsTyping:isTyping];
 	} @catch (NSException *e) {
 		NSLog(@"SMServer_app: sendTyping exception: %@", e);
@@ -159,30 +139,5 @@
 		return NO;
 	}
 }
-
-/// This is not being used, but I am leaving it here for future versions in case I figure out how to make it work well.
-/// The issue right now is that this code works when I sign it with the com.apple.messages.pinned
-/// (or something like that) entitlement, but I can't have Xcode automatically sign it with that, so I'd have to
-/// manually codesign each time that I want to debug. That would be a massive hassle so I'm not going to do it until
-/// I find an easier solution
-
-/// also it doesn't work correctly. Look to libSMServer for exactly how to do this correctly
-
-/*- (NSArray *)getPinnedChats {
- NSBundle* imcore = [[NSBundle alloc] initWithPath:@"/System/Library/PrivateFrameworks/IMCore.framework"];
- [imcore load];
-
- IMDaemonController* controller = [c(IMDaemonController) sharedController];
- __block NSArray* pins = [NSArray array];
-
- if ([controller connectToDaemon] && [[NSProcessInfo processInfo] operatingSystemVersion].majorVersion >= 14) {
-	IMPinnedConversationsController* pinnedController = [c(IMPinnedConversationsController) sharedInstance];
-	NSOrderedSet* set = [pinnedController pinnedConversationIdentifierSet];
-
-	pins = [set array];
- }
-
- return pins;
-}*/
 
 @end
