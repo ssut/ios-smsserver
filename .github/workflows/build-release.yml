@@ -163,10 +163,33 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES
           test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
 
-      - name: Sign with ldid
+      - name: Fix libmryipc and sign all binaries
         run: |
-          ldid -Ssrc/app.entitlements \
-            package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
+          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
+
+          # Download the correct libmryipc (same as what the tweak uses)
+          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
+            -o /tmp/libmryipc.dylib
+
+          # Extract arm64 slice (the app is arm64 only)
+          lipo /tmp/libmryipc.dylib -thin arm64 -output "${APP}/Frameworks/libmryipc.dylib"
+
+          # Fix the install name to use @rpath
+          install_name_tool -id @rpath/libmryipc.dylib "${APP}/Frameworks/libmryipc.dylib"
+
+          # Fix the main binary's reference to libmryipc
+          install_name_tool -change /usr/lib/libmryipc.dylib @rpath/libmryipc.dylib "${APP}/SMServer"
+
+          # Sign everything
+          ldid -Ssrc/app.entitlements "${APP}/SMServer"
+          for fw in "${APP}"/Frameworks/*.framework/; do
+            name=$(basename "$fw" .framework)
+            if [ -f "$fw/$name" ]; then
+              ldid -S "$fw/$name"
+            fi
+          done
+          ldid -S "${APP}/Frameworks/libmryipc.dylib"
+          echo "All binaries signed"
 
       - name: Build app deb
         run: |
