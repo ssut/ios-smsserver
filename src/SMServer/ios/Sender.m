@@ -47,23 +47,39 @@
 - (void)handleReceivedTextWithCallback:(NSString *)guid {
 	/// This is the function that is called when a new text is received, or you send a text through SMServer.
 	/// _setTexts is a block that is set somewhere around line 38 in `ServerDelegate.swift`, in `loadFuncs()`.
-	_setTexts(guid);
+	@try {
+		if (_setTexts) _setTexts(guid);
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: handleReceivedTextWithCallback exception: %@", e);
+	}
 }
 
 - (void)handlePartyTypingWithCallback:(NSDictionary *)vals {
 	/// This is called when someone else starts typing
 	/// `_setTyping` is a block that is set somewhere around line 42 in `ServerDelegate.swift`, in `loadFuncs()`.
-	_setTyping(vals);
+	@try {
+		if (_setTyping) _setTyping(vals);
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: handlePartyTypingWithCallback exception: %@", e);
+	}
 }
 
 - (void)handleSentTapbackWithCallback:(NSDictionary *)vals {
 	/// This is called when you send a reaction through SMServer
 	/// _sentTapback is a block that is set somewhere around line 46 in `ServerDelegate.swift`, in loadFuncs().
-	_sentTapback([[vals objectForKey:@"tapback"] intValue], [vals objectForKey:@"guid"]);
+	@try {
+		if (_sentTapback) _sentTapback([[vals objectForKey:@"tapback"] intValue], [vals objectForKey:@"guid"]);
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: handleSentTapbackWithCallback exception: %@", e);
+	}
 }
 
 - (void)handleTextReadWithCallback:(NSString *)guid {
-	_textRead(guid);
+	@try {
+		if (_textRead) _textRead(guid);
+	} @catch (NSException *e) {
+		NSLog(@"SMServer_app: handleTextReadWithCallback exception: %@", e);
+	}
 }
 
 @end
