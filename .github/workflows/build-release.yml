@@ -156,7 +156,7 @@ jobs:
             ARCHS="arm64" \
             EXCLUDED_ARCHS="arm64e" \
             ONLY_ACTIVE_ARCH=NO \
-            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
