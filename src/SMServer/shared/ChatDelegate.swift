@@ -7,7 +7,7 @@ import Photos
 import Contacts
 #endif
 
-let chat_columns = ["m.ROWID", "m.is_read", "m.is_from_me", "m.text", "m.item_type", "m.date_read", "m.date", "m.cache_has_attachments", "m.balloon_bundle_id", "m.share_direction", "c.chat_identifier", "c.display_name", "c.room_name"]
+let chat_columns = ["m.ROWID", "m.is_read", "m.is_from_me", "m.text", "m.attributedBody", "m.item_type", "m.date_read", "m.date", "m.cache_has_attachments", "m.balloon_bundle_id", "m.share_direction", "c.chat_identifier", "c.display_name", "c.room_name"]
 
 final class ChatDelegate {
 	let settings = Settings.shared()
@@ -113,13 +113,22 @@ final class ChatDelegate {
 			var minor_return = [String:String]()
 			/// for every column in the row
 			for j in 0..<columns.count {
+				let id = split_ids ? String(columns[j].split(separator: ".").last ?? Substring(columns[j])) : columns[j]
+				if columns[j].hasSuffix("attributedBody") {
+					var decoded = ""
+					if let blob = sqlite3_column_blob(statement, Int32(j)) {
+						let length = Int(sqlite3_column_bytes(statement, Int32(j)))
+						decoded = ChatDelegate.decodeAttributedBody(Data(bytes: blob, count: length)) ?? ""
+					}
+					minor_return[id] = decoded
+					continue
+				}
 				var tiny_return = ""
 				/// Get the string for the specific column
 				if let tiny_return_cstring = sqlite3_column_text(statement, Int32(j)) {
 					tiny_return = String(cString: tiny_return_cstring)
 				}
 				/// add it to return value
-				let id = split_ids ? String(columns[j].split(separator: ".")[1]) : columns[j]
 				minor_return[id] = tiny_return
 			}
 			/// Add it to return value
@@ -139,6 +148,46 @@ final class ChatDelegate {
 		return main_return
 	}
 
+	static func decodeAttributedBody(_ data: Data) -> String? {
+		let bytes = [UInt8](data)
+		let marker = Array("NSString".utf8)
+		guard bytes.count > marker.count else { return nil }
+		var markerIndex: Int? = nil
+		var idx = 0
+		while idx + marker.count <= bytes.count {
+			if bytes[idx] == marker[0] && Array(bytes[idx..<(idx + marker.count)]) == marker {
+				markerIndex = idx
+				break
+			}
+			idx += 1
+		}
+		guard let found = markerIndex else { return nil }
+		var cursor = found + marker.count
+		let limit = min(bytes.count, cursor + 40)
+		while cursor < limit && bytes[cursor] != 0x2B { cursor += 1 }
+		guard cursor < limit else { return nil }
+		cursor += 1
+		guard cursor < bytes.count else { return nil }
+		let lead = bytes[cursor]
+		var length = 0
+		if lead < 0x80 {
+			length = Int(lead)
+			cursor += 1
+		} else if lead == 0x81 {
+			guard cursor + 2 < bytes.count else { return nil }
+			length = Int(bytes[cursor + 1]) | (Int(bytes[cursor + 2]) << 8)
+			cursor += 3
+		} else if lead == 0x82 {
+			guard cursor + 4 < bytes.count else { return nil }
+			length = Int(bytes[cursor + 1]) | (Int(bytes[cursor + 2]) << 8) | (Int(bytes[cursor + 3]) << 16) | (Int(bytes[cursor + 4]) << 24)
+			cursor += 5
+		} else {
+			return nil
+		}
+		guard length > 0, cursor + length <= bytes.count else { return nil }
+		return String(bytes: bytes[cursor..<(cursor + length)], encoding: .utf8)
+	}
+
 	final func parseTexts(_ texts: inout [[String:Any]], db: OpaquePointer?, contact_db: OpaquePointer?, is_group: Bool = false) {
 		Const.log("parsing texts with length \(texts.count)")
 
@@ -146,7 +195,10 @@ final class ChatDelegate {
 		let bad_bundles = ["com.apple.DigitalTouchBalloonProvider", "com.apple.Handwriting.HandwritingProvider"]
 
 		for i in 0..<texts.count {
-			texts[i]["text"] = (texts[i]["text"] as? String ?? "").replacingOccurrences(of: "\u{fffc}", with: "", options: NSString.CompareOptions.literal, range: nil)
+			let raw_text = texts[i]["text"] as? String ?? ""
+			let body_text = raw_text.isEmpty ? (texts[i]["attributedBody"] as? String ?? "") : raw_text
+			texts[i].removeValue(forKey: "attributedBody")
+			texts[i]["text"] = body_text.replacingOccurrences(of: "\u{fffc}", with: "", options: NSString.CompareOptions.literal, range: nil)
 
 			/// Get details about attachments if there are any attachments associated with this message
 			if texts[i]["cache_has_attachments"] as? String == "1", let rowid = texts[i]["ROWID"] as? String {
@@ -172,8 +224,9 @@ final class ChatDelegate {
 
 			/// This checks if it has anything in the `payload_data` field, which would imply that it is a special message (e.g. rich link, gamepigeon message, etc).
 			/// However, it doesn't enter the `if` if the message is a handwritten message or a digital touch message, since I don't know how to parse those yet.
-			if (texts[i]["payload_data"] as? String)?.isEmpty ?? false,
+			if !((texts[i]["payload_data"] as? String)?.isEmpty ?? true),
 			   let balloon_id = texts[i]["balloon_bundle_id"] as? String,
+			   !balloon_id.isEmpty,
 			   !bad_bundles.contains(balloon_id),
 			   let rowid = texts[i]["ROWID"] as? String {
 				let link_info = getLinkInfo(rowid, db: db)
@@ -243,7 +296,9 @@ final class ChatDelegate {
 		                             chat["m.is_read"] as? String ?? "" == "0" &&
 		                             chat["m.item_type"] as? String ?? "" == "0"
 
-			let latest_text = String((chat["m.text"] as? String ?? "").replacingOccurrences(of: "\u{fffc}", with: "", options: NSString.CompareOptions.literal, range: nil))
+			let chat_text = chat["m.text"] as? String ?? ""
+			let latest_raw = chat_text.isEmpty ? (chat["m.attributedBody"] as? String ?? "") : chat_text
+			let latest_text = String(latest_raw.replacingOccurrences(of: "\u{fffc}", with: "", options: NSString.CompareOptions.literal, range: nil))
 			new_chat["latest_text"] = latest_text
 
 
@@ -441,7 +496,7 @@ final class ChatDelegate {
 
 		var messages: [[String:Any]] = selectFromSql(
 			db: db,
-			columns: ["m.ROWID", "m.guid", "m.text", "m.subject", "m.is_from_me", "m.date", "m.date_read", "m.service", "m.cache_has_attachments", "m.balloon_bundle_id", "m.payload_data", "m.associated_message_guid", "m.associated_message_type", "m.item_type", "m.group_action_type", "m.other_handle", "h.id"],
+			columns: ["m.ROWID", "m.guid", "m.text", "m.attributedBody", "m.subject", "m.is_from_me", "m.date", "m.date_read", "m.service", "m.cache_has_attachments", "m.balloon_bundle_id", "m.payload_data", "m.associated_message_guid", "m.associated_message_type", "m.item_type", "m.group_action_type", "m.other_handle", "h.id"],
 			table: "message m",
 			condition: "left join handle h on h.ROWID = m.handle_id where m.ROWID in (select message_id from chat_message_join where chat_id in (select ROWID from chat where chat_identifier is \(fixed_num)\(from_string))) order by m.date desc",
 			args: num.split(separator: ",").map({String($0)}),
@@ -472,9 +527,10 @@ final class ChatDelegate {
 		if offset == 0 {
 			#if os(iOS)
 			if Const.getOSVersion() >= 14.0 {
+				dp_group.enter()
 				DispatchQueue.global(qos: .default).async {
-					dp_group.enter()
-					pinned_chats = self.getPinnedChats()
+					let pins = self.getPinnedChats()
+					pinned_chats = pins
 					dp_group.leave()
 				}
 			}
@@ -545,9 +601,12 @@ final class ChatDelegate {
 
 		/// Just in case your pinned chats aren't in your most recent texts
 		if offset == 0, let pins = pinned_chats {
-			for chat in pins {
-				let details = getChatDetails(chat)
-				ret.append(details)
+			let present = Set(ret.compactMap { $0["chat_identifier"] as? String })
+			for chat in pins where !present.contains(chat) {
+				let details = getChatDetails(chat, include_pinned: false)
+				if !details.isEmpty {
+					ret.append(details)
+				}
 			}
 		}
 
@@ -585,18 +644,23 @@ final class ChatDelegate {
 		return ret
 	}
 
-	final func getChatDetails(_ chat_id: String) -> [String:Any] {
+	final func getChatDetails(_ chat_id: String, include_pinned: Bool = true) -> [String:Any] {
 		var db = createConnection()
 		var contacts_db = createConnection(connection_string: Const.contacts_address)
-		if db == nil || contacts_db == nil { return [String:Any]() }
+		if db == nil || contacts_db == nil {
+			closeDatabase(&db)
+			closeDatabase(&contacts_db)
+			return [String:Any]()
+		}
 
 		var pinned_chats: [String]? = [String]()
 		let dp_group = DispatchGroup()
 
-		if Const.getOSVersion() >= 14.0 {
+		if include_pinned && Const.getOSVersion() >= 14.0 {
+			dp_group.enter()
 			DispatchQueue.global().async {
-				dp_group.enter()
-				pinned_chats = self.getPinnedChats()
+				let pins = self.getPinnedChats()
+				pinned_chats = pins
 				dp_group.leave()
 			}
 		}
@@ -605,22 +669,24 @@ final class ChatDelegate {
 			db: db,
 			columns: chat_columns,
 			table: "chat_message_join j",
-			condition: "inner join message m on j.message_id = m.ROWID inner join chat c on c.ROWID = j.chat_id where c.chat_identifier is ?",
+			condition: "inner join message m on j.message_id = m.ROWID inner join chat c on c.ROWID = j.chat_id where c.chat_identifier is ? order by j.message_date desc",
 			args: [chat_id],
 			num_items: 1
 		)
 
 		let arr = parseChats(chats, db: db, contact_db: contacts_db)
 
+		dp_group.wait()
+
 		guard chats.count > 0, let chat_id = chats[0]["c.chat_identifier"] as? String, arr.count > 0 else {
+			closeDatabase(&db)
+			closeDatabase(&contacts_db)
 			return [String:Any]()
 		}
 
 		var ret = arr[0]
 
-		dp_group.wait()
-
-		ret["pinned"] = pinned_chats?.contains(chat_id)
+		ret["pinned"] = include_pinned ? (pinned_chats?.contains(chat_id) ?? false) : true
 
 		closeDatabase(&db)
 		closeDatabase(&contacts_db)
@@ -848,11 +914,15 @@ final class ChatDelegate {
 
 		var return_texts = [String:[[String:Any]]]()
 
-		var texts: [[String:Any]] = selectFromSql(db: db, columns: ["c.chat_identifier", "c.display_name", "m.ROWID", "m.text", "m.service", "m.date", "m.cache_has_attachments"], table: "message m", condition: "inner join chat_message_join j on j.message_id = m.ROWID inner join chat c on j.chat_id = c.ROWID WHERE text like ? order by m.date desc", args: ["%\(upperTerm)%"], split_ids: true)
+		var texts: [[String:Any]] = selectFromSql(db: db, columns: ["c.chat_identifier", "c.display_name", "m.ROWID", "m.text", "m.attributedBody", "m.service", "m.date", "m.cache_has_attachments"], table: "message m", condition: "inner join chat_message_join j on j.message_id = m.ROWID inner join chat c on j.chat_id = c.ROWID WHERE m.text like ? escape '\\' or (m.text is null and instr(m.attributedBody, cast(? as blob)) > 0) order by m.date desc", args: ["%\(upperTerm)%", term], split_ids: true)
 
 		/// If case sensitive, remove those who don't exactly match. sqlite select is hardcoded case insensitive
 		if case_sensitive {
-			texts.removeAll { !(($0["text"] as? String)?.contains(term) ?? false) }
+			texts.removeAll { text in
+				let raw = text["text"] as? String ?? ""
+				let body = raw.isEmpty ? (text["attributedBody"] as? String ?? "") : raw
+				return !body.contains(term)
+			}
 		}
 
 		parseTexts(&texts, db: db, contact_db: contact_db)
@@ -1057,7 +1127,7 @@ final class ChatDelegate {
 		for _ in 0..<10 {
 			text_array = selectFromSql(
 				db: db,
-				columns: ["m.ROWID", "m.guid", "m.text", "m.subject", "m.is_from_me", "m.date", "m.date_read", "m.service", "m.cache_has_attachments", "m.handle_id", "m.balloon_bundle_id", "m.associated_message_guid", "m.associated_message_type", "h.id", "c.chat_identifier", "c.room_name"],
+				columns: ["m.ROWID", "m.guid", "m.text", "m.attributedBody", "m.subject", "m.is_from_me", "m.date", "m.date_read", "m.service", "m.cache_has_attachments", "m.handle_id", "m.balloon_bundle_id", "m.associated_message_guid", "m.associated_message_type", "h.id", "c.chat_identifier", "c.room_name"],
 				table: "message m",
 				condition: "left join handle h on h.ROWID = m.handle_id inner join chat_message_join j on j.message_id = m.ROWID inner join chat c on j.chat_id = c.ROWID where m.guid is ?",
 				args: [guid],
@@ -1100,7 +1170,7 @@ final class ChatDelegate {
 		for _ in 0..<10 {
 			text_array = selectFromSql(
 				db: db,
-				columns: ["m.ROWID", "m.guid", "m.text", "m.subject", "m.is_from_me", "m.date", "m.service", "m.cache_has_attachments", "m.handle_id", "m.balloon_bundle_id", "m.associated_message_guid", "m.associated_message_type", "h.id", "c.chat_identifier", "c.room_name"],
+				columns: ["m.ROWID", "m.guid", "m.text", "m.attributedBody", "m.subject", "m.is_from_me", "m.date", "m.service", "m.cache_has_attachments", "m.handle_id", "m.balloon_bundle_id", "m.associated_message_guid", "m.associated_message_type", "h.id", "c.chat_identifier", "c.room_name"],
 				table: "message m",
 				condition: "left join handle h on h.ROWID = m.handle_id inner join chat_message_join j on j.message_id = m.ROWID inner join chat c on j.chat_id = c.ROWID where m.associated_message_guid like ? and m.associated_message_type is ?",
 				args: ["%\(guid)%", Int(tapback)],
@@ -1279,17 +1349,12 @@ final class ChatDelegate {
 	}
 
 	final func getPinnedChats() -> [String]? {
-		let center = MRYIPCCenter(named: "com.ianwelker.smserver")
-
-		// Swift is lying to you here. This method can throw, but it's written in obj-c
-		// so it doesn't show that in the method signature, so Swift thinks it can't.
-		do {
-			// We have to call this twice since the first one never retrieves them, for some reason.
-			let _ = try center?.callExternalMethod(#selector(SMServerIPC.getPinnedChats), withArguments: nil)
-			return try center?.callExternalMethod(#selector(SMServerIPC.getPinnedChats), withArguments: nil) as? [String]
-		} catch {
-			Const.log("Failed to get pinned chats: \(error)", warning: true)
-			return nil
-		}
+		#if os(iOS)
+		let pins = ServerDelegate.sender.getPinnedChats() as? [String]
+		Const.log("event=pinned_chats_loaded count=\(pins?.count ?? -1)")
+		return pins
+		#else
+		return nil
+		#endif
 	}
 }

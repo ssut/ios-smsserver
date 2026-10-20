@@ -8,14 +8,9 @@ class SocketMessage {
 	init(_ json: [String: Any], incoming: Bool, last: Bool = true) {
 		id = json["id"] as? String
 		command = str_to_command[json["command"] as? String ?? ""] ?? .Indecipherable
-		data = {
-			if json["id"] as? String == nil {
-				return json["data"] as? [String:Any] ?? [String:Any]()
-			}
-			return json["params"] as? [String:Any] ?? [String:Any]()
-		}()
+		data = json["params"] as? [String:Any] ?? json["data"] as? [String:Any] ?? [String:Any]()
 		self.incoming = incoming
-		self.last = true
+		self.last = last
 	}
 
 	init(_ id: String?, command: APICommand, data: Any, incoming: Bool, last: Bool = true) {

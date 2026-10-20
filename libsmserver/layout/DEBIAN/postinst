@@ -1,0 +1,10 @@
+#!/var/jb/bin/sh
+export PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin
+if [ "$1" = "configure" ]; then
+  mkdir -p /var/mobile/Library/SMServer
+  chown mobile:mobile /var/mobile/Library/SMServer
+  chmod 0700 /var/mobile/Library/SMServer
+  echo "[libsmserver-postinst] event=respring reason=tweak_configured previous=${2:-none}"
+  killall -9 SpringBoard >/dev/null 2>&1 || true
+fi
+exit 0

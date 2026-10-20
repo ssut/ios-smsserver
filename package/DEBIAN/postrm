@@ -1,2 +1,8 @@
-#!/bin/bash
-rm -rf /var/jb/Applications/SMServer.app/
+#!/var/jb/bin/sh
+export PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+  uicache -u /var/jb/Applications/SMServer.app >/dev/null 2>&1 || true
+  rm -rf /var/jb/Applications/SMServer.app/
+  rm -f /var/mobile/Library/SMServer/app.sock /var/mobile/Library/SMServer/springboard.sock
+fi
+exit 0

@@ -5,7 +5,6 @@ class Settings {
 	var socket_port: Int = UserDefaults.standard.object(forKey: "socket_port") as? Int ?? 8740
 	var password: String = UserDefaults.standard.object(forKey: "password") as? String ?? "toor"
 	var socket_subdirectory: String? = UserDefaults.standard.object(forKey: "socket_subdirectory") as? String
-	/// This passphrase is found in a hidden file that doesn't exist in the git repo. This is so that nobody can extract the private key from the pfx file
 	var cert_pass: String = PKCS12Identity.pass
 
 	var default_num_chats: UInt = UserDefaults.standard.object(forKey: "num_chats") as? UInt ?? 40
@@ -38,6 +37,12 @@ class Settings {
 	var remote_secure: Bool = UserDefaults.standard.object(forKey: "remote_secure") as? Bool ?? true
 	var remote_bypass_cert: Bool = UserDefaults.standard.object(forKey: "remote_bypass_cert") as? Bool ?? true
 
+	var api_token: String = Settings.loadOrCreateApiToken()
+	var api_token_enabled: Bool = UserDefaults.standard.object(forKey: "api_token_enabled") as? Bool ?? true
+	var cors_enabled: Bool = UserDefaults.standard.object(forKey: "cors_enabled") as? Bool ?? false
+	var cors_origins: String = UserDefaults.standard.object(forKey: "cors_origins") as? String ?? "*"
+	var session_ttl_seconds: Int = UserDefaults.standard.object(forKey: "session_ttl_seconds") as? Int ?? 86400
+
 	var show_help: Bool = false
 	var cli_background: Bool = false
 
@@ -55,11 +60,70 @@ class Settings {
 		return sharedSettings
 	}
 
+	func themeName() -> String {
+		if light_theme { return "light" }
+		if nord_theme { return "nord" }
+		return "dark"
+	}
+
+	func setTheme(_ name: String) {
+		light_theme = name == "light"
+		nord_theme = name == "nord"
+		UserDefaults.standard.setValue(light_theme, forKey: "light_theme")
+		UserDefaults.standard.setValue(nord_theme, forKey: "nord_theme")
+	}
+
+	func corsOriginList() -> [String] {
+		return cors_origins
+			.split(separator: ",")
+			.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+			.filter({ !$0.isEmpty })
+	}
+
+	@discardableResult
+	func regenerateApiToken() -> String {
+		let token = Settings.generateToken()
+		api_token = token
+		UserDefaults.standard.setValue(token, forKey: "api_token")
+		Const.log("event=settings.api_token.regenerated length=\(token.count)")
+		return token
+	}
+
+	static func loadOrCreateApiToken() -> String {
+		if let existing = UserDefaults.standard.object(forKey: "api_token") as? String, existing.count >= 16 {
+			return existing
+		}
+		let token = generateToken()
+		UserDefaults.standard.setValue(token, forKey: "api_token")
+		return token
+	}
+
+	static func generateToken(byteCount: Int = 24) -> String {
+		var generator = SystemRandomNumberGenerator()
+		let bytes = (0..<byteCount).map({ _ in UInt8.random(in: UInt8.min...UInt8.max, using: &generator) })
+		return bytes.map({ String(format: "%02x", $0) }).joined()
+	}
+
+	static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+		let left = Array(lhs.utf8)
+		let right = Array(rhs.utf8)
+		let length = max(left.count, right.count)
+		var difference: UInt8 = left.count == right.count ? 0 : 1
+
+		for index in 0..<length {
+			let a: UInt8 = index < left.count ? left[index] : 0
+			let b: UInt8 = index < right.count ? right[index] : 0
+			difference |= a ^ b
+		}
+
+		return difference == 0
+	}
+
 	func parseArgs() {
 		let settings = Settings.shared()
 		var past_val = false
 
-		#if DEBUG // ugh. Apple. just don't pass in unnecessary cmdline args and everything will be fine.
+		#if DEBUG
 		let args = Array(CommandLine.arguments.dropFirst()).filter({ $0 != "-NSDocumentRevisionsDebugMode" })
 		#else
 		let args = Array(CommandLine.arguments.dropFirst())
@@ -103,6 +167,12 @@ class Settings {
 						settings.socket_subdirectory = val
 					case Const.cmd_password:
 						settings.password = val
+					case Const.cmd_api_token:
+						settings.api_token = val
+						settings.api_token_enabled = true
+					case Const.cmd_cors_origins:
+						settings.cors_origins = val
+						settings.cors_enabled = true
 #if os(macOS)
 					case Const.cmd_config_file, Const.cmd_config_file_short:
 						if !FileManager.default.fileExists(atPath: val) {
@@ -111,7 +181,7 @@ class Settings {
 							settings.config_file_url = val
 						}
 					case Const.cmd_html_dir, Const.cmd_html_dir_short:
-						var is_dir: ObjCBool = true /// why? terrible design, apple. just make it a regular bool
+						var is_dir: ObjCBool = true
 						if !FileManager.default.fileExists(atPath: val, isDirectory: &is_dir) {
 							print("Cannot find directory at \(val). Please ensure that you are passing in the absolute path and that a file exists at this location")
 						} else {
@@ -145,7 +215,6 @@ class Settings {
 				}
 			} else {
 
-				/// check if it's a lot of single letter options, like `-aisb`
 				if opt.count > 2 && Array(opt)[1] != "-" {
 					let forbidden: [String] = Const.cmd_req_vals.filter({ $0.count == 2 }).map({ String($0.suffix(1)) })
 
@@ -212,6 +281,10 @@ class Settings {
 							settings.remote_secure = opt != Const.cmd_rem_no_sec
 						case Const.cmd_rem_bypass, Const.cmd_rem_bypass_short, Const.cmd_rem_no_bypass:
 							settings.remote_bypass_cert = opt != Const.cmd_rem_no_bypass
+						case Const.cmd_cors, Const.cmd_no_cors:
+							settings.cors_enabled = opt != Const.cmd_no_cors
+						case Const.cmd_no_api_token:
+							settings.api_token_enabled = false
 						default:
 							print("Option -\(opt) not recognized. Ignoring...")
 					}

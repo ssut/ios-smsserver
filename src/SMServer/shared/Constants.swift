@@ -84,6 +84,28 @@ class Const : NSObject {
 		api_match_type
 	]
 
+	static let api_v1_prefix: String = "/api/v1"
+	static let api_v1_version: Int = 1
+	static let api_static_prefix: String = "/static"
+	static let api_token_query_key: String = "token"
+	static let api_auth_header: String = "Authorization"
+	static let api_bearer_prefix: String = "Bearer "
+	static let api_session_token_prefix: String = "sms_"
+	static let api_max_list_limit: Int = 1000
+	static let api_max_chat_limit: Int = 500
+	static let api_html_config_placeholder: String = "__SMSERVER_CONFIG__"
+	static let api_product_name: String = "SMServer"
+	static let api_tapback_names: [String] = ["love", "like", "dislike", "laugh", "emphasize", "question"]
+
+	static let ws_cmd_hello: String = "hello"
+	static let ws_cmd_pong: String = "pong"
+	static let ws_cmd_ping: String = "ping"
+	static let ws_cmd_send_typing: String = "send-typing"
+	static let ws_cmd_new_message: String = "new-message"
+	static let ws_cmd_typing: String = "typing"
+	static let ws_cmd_read: String = "read-message"
+	static let ws_cmd_battery: String = "battery-status"
+
 	static let custom_css_path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("smserver_custom.css")
 
 	#if os(iOS)
@@ -154,6 +176,13 @@ class Const : NSObject {
 
 	\(cmd_web_short), \(cmd_web), \(cmd_no_web):
 		This will enable or disable the web interface (not the API). The default is enabled.
+
+	\(cmd_api_token), \(cmd_no_api_token):
+		\(cmd_api_token) sets the static bearer token accepted by the /api/v1 endpoints for this run (otherwise the token saved in the app is used).
+		\(cmd_no_api_token) disables bearer-token authentication, leaving password/session authentication only.
+
+	\(cmd_cors), \(cmd_no_cors), \(cmd_cors_origins):
+		Enable or disable CORS headers on /api/v1 (default disabled). \(cmd_cors_origins) takes a comma separated list of allowed origins (or *) and implies \(cmd_cors).
 	"""
 
 	#elseif os(macOS)
@@ -299,6 +328,12 @@ class Const : NSObject {
 	static let cmd_rem_bypass_short: String = "-k"
 	static let cmd_rem_no_bypass: String = "--no_remote_bypass"
 
+	static let cmd_api_token: String = "--api_token"
+	static let cmd_no_api_token: String = "--no_api_token"
+	static let cmd_cors: String = "--cors"
+	static let cmd_no_cors: String = "--no_cors"
+	static let cmd_cors_origins: String = "--cors_origins"
+
 	static let cmd_req_vals = [
 		cmd_server_port, cmd_server_port_short,
 		cmd_socket_port, cmd_socket_port_short,
@@ -308,6 +343,7 @@ class Const : NSObject {
 		cmd_theme, cmd_theme_short,
 		cmd_def_chats, cmd_def_messages, cmd_def_photos,
 		cmd_rem_addr, cmd_rem_addr_short,
+		cmd_api_token, cmd_cors_origins,
 	]
 
 	static let cmd_bool_vals = [
@@ -322,7 +358,8 @@ class Const : NSObject {
 		cmd_background, cmd_background_short, cmd_no_background,
 		cmd_rem_run, cmd_rem_run_short, cmd_rem_no_run,
 		cmd_rem_sec, cmd_rem_sec_short, cmd_rem_no_sec,
-		cmd_rem_bypass, cmd_rem_bypass_short, cmd_rem_no_bypass
+		cmd_rem_bypass, cmd_rem_bypass_short, cmd_rem_no_bypass,
+		cmd_cors, cmd_no_cors, cmd_no_api_token
 	]
 
 	static let col = "\u{001B}["
@@ -337,8 +374,47 @@ class Const : NSObject {
 			if CommandLine.argc > 1 {
 				print("\(log_prefix)\(warning ? log_warning : "")\(s)")
 			} else {
-				os_log("%{public}@%{public}@%{public}@", log: OSLog(subsystem: "com.ianwelker.smserver", category: "debugging"), type: .debug, log_prefix, warning ? log_warning : "", s)
+				os_log("%{public}@%{public}@%{public}@", log: OSLog(subsystem: "com.ianwelker.smserver", category: "debugging"), type: warning ? .error : .default, log_prefix, warning ? log_warning : "", s)
 			}
+			FileLog.append("\(warning ? "level=warn " : "level=info ")\(s)")
+		}
+	}
+
+	enum FileLog {
+		static let path = "/var/mobile/Library/SMServer/smserver.log"
+		static let maxBytes: UInt64 = 2 * 1024 * 1024
+		private static let queue = DispatchQueue(label: "com.ianwelker.smserver.filelog")
+		private static let formatter: ISO8601DateFormatter = {
+			let f = ISO8601DateFormatter()
+			f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+			return f
+		}()
+
+		static func append(_ line: String) {
+			#if os(iOS)
+			let stamp = formatter.string(from: Date())
+			let pid = getpid()
+			queue.async {
+				let fm = FileManager.default
+				let dir = (path as NSString).deletingLastPathComponent
+				if !fm.fileExists(atPath: dir) {
+					try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+				}
+				if let attrs = try? fm.attributesOfItem(atPath: path), let size = attrs[.size] as? UInt64, size > maxBytes {
+					let rotated = path + ".1"
+					try? fm.removeItem(atPath: rotated)
+					try? fm.moveItem(atPath: path, toPath: rotated)
+				}
+				guard let data = "\(stamp) pid=\(pid) \(line)\n".data(using: .utf8) else { return }
+				if let handle = FileHandle(forWritingAtPath: path) {
+					handle.seekToEndOfFile()
+					handle.write(data)
+					handle.closeFile()
+				} else {
+					fm.createFile(atPath: path, contents: data, attributes: [.posixPermissions: 0o600])
+				}
+			}
+			#endif
 		}
 	}
 
@@ -490,6 +566,39 @@ class Const : NSObject {
 			}
 		}
 		return nil
+	}
+
+	static func appVersion() -> String {
+		return Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+	}
+
+	static func appleToUnix(_ apple: Double) -> Double {
+		return (apple / 1000000000.0) + 978307200.0
+	}
+
+	static func unixNow() -> Int {
+		return Int(Date().timeIntervalSince1970)
+	}
+
+	static func mimeType(forExtension ext: String) -> String {
+		switch ext.lowercased() {
+			case "html", "htm": return "text/html; charset=utf-8"
+			case "css": return "text/css; charset=utf-8"
+			case "js", "mjs": return "application/javascript; charset=utf-8"
+			case "json": return "application/json; charset=utf-8"
+			case "svg": return "image/svg+xml"
+			case "png": return "image/png"
+			case "jpg", "jpeg": return "image/jpeg"
+			case "gif": return "image/gif"
+			case "webp": return "image/webp"
+			case "ico": return "image/x-icon"
+			case "woff": return "font/woff"
+			case "woff2": return "font/woff2"
+			case "ttf": return "font/ttf"
+			case "txt": return "text/plain; charset=utf-8"
+			case "webmanifest": return "application/manifest+json"
+			default: return "application/octet-stream"
+		}
 	}
 }
 

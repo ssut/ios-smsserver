@@ -1,94 +1,338 @@
-<html>
-	<head>
-		<meta charset="utf-8" />
-		<link rel="shortcut icon" type="image/x-icon" href="favicon.ico?" id="favicon"/>
-		<title>
-			GateKeeper
-		</title>
-		<style>
-			:root {
-				--main-box-height: 80px;
-			}
-			body {
-				background-color: #171717;
-				height: 100%;
-				overflow: hidden;
-			}
-			.container {
-				display: grid;
-				height: 100%;
-			}
-			.centered_box {
-				position: absolute;
-				top: 50%;
-				left: 50%;
-				transform: translate(-50%, -50%);
-				background-color: #323232;
-				border-radius: 10px;
-				padding: 1px 20px 20px 20px;
-				box-shadow: 10px 10px 5px #080808;
-			}
-			#input {
-				margin-bottom: 20px;
-				width: 300px;
-				border-radius: 5px;
-				outline: none;
-				border: none;
-				padding: 4px;
-			}
-			h1 {
-				color: #fff;
-				font-family: Calibri, 'Gill Sans', 'Gill Sans MT', 'Trebuchet MS', sans-serif;
-				font-weight: 300;
-			}
-			button {
-				background-color: white;
-				border: none;
-				outline: none;
-				border-radius: 2px;
-				height: 20px;
-				width: 70px;
-				transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-				font-size: 16px;
-			}
-			button:hover {
-				background-color: lightskyblue;
-				transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-			}
-			.wrong {
-				background-color: #d85050;
-				color: white;
-			}
-			.wrong::placeholder {
-				color: #383838;
-			}
-		</style>
-		<script>
-			var response_text = "";
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>SMServer</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/favicon.ico">
+<script>window.SMSERVER_CONFIG = __SMSERVER_CONFIG__;</script>
+<script>
+(() => {
+	const themes = ["system", "dark", "light", "nord"];
+	let stored = null;
+	try {
+		stored = localStorage.getItem("smserver.theme");
+	} catch (error) {
+		stored = null;
+	}
+	const configured = window.SMSERVER_CONFIG && window.SMSERVER_CONFIG.theme;
+	const theme = themes.includes(stored) ? stored : (themes.includes(configured) ? configured : "dark");
+	document.documentElement.setAttribute("data-theme", theme);
+})();
+</script>
+<style>
+:root {
+	color-scheme: dark;
+	--font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+	--bg: #0f1115;
+	--bg-elevated: #1d2129;
+	--bg-input: #242933;
+	--border: #2a2f3a;
+	--text: #e6e9ef;
+	--text-muted: #9aa3b2;
+	--accent: #3b82f6;
+	--accent-strong: #2563eb;
+	--accent-contrast: #ffffff;
+	--danger: #ef4444;
+	--shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+	--radius: 16px;
+	--radius-sm: 10px;
+}
 
-			async function submitPassword() {
-				var input = document.getElementById("input").value
+:root[data-theme="light"] {
+	color-scheme: light;
+	--bg: #f5f6f8;
+	--bg-elevated: #ffffff;
+	--bg-input: #eceef2;
+	--border: #dcdfe5;
+	--text: #1c1f26;
+	--text-muted: #5b6372;
+	--accent: #2563eb;
+	--accent-strong: #1d4ed8;
+	--shadow: 0 8px 24px rgba(20, 24, 32, 0.18);
+}
 
-				var url = `requests?password=${input}`
-				await fetch(url).then(response => response.text())
-				.then(response => { response_text = response; })
+@media (prefers-color-scheme: light) {
+	:root[data-theme="system"] {
+		color-scheme: light;
+		--bg: #f5f6f8;
+		--bg-elevated: #ffffff;
+		--bg-input: #eceef2;
+		--border: #dcdfe5;
+		--text: #1c1f26;
+		--text-muted: #5b6372;
+		--accent: #2563eb;
+		--accent-strong: #1d4ed8;
+		--shadow: 0 8px 24px rgba(20, 24, 32, 0.18);
+	}
+}
 
-				if (response_text !== "true") {
-					document.getElementById("input").setAttribute("class", "wrong");
-					document.getElementById("input").value = "";
-				} else {
-					window.location.reload(true)
-				}
+:root[data-theme="nord"] {
+	--bg: #2e3440;
+	--bg-elevated: #3b4252;
+	--bg-input: #4c566a;
+	--border: #434c5e;
+	--text: #eceff4;
+	--text-muted: #d8dee9;
+	--accent: #88c0d0;
+	--accent-strong: #81a1c1;
+	--accent-contrast: #2e3440;
+	--danger: #bf616a;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	font-family: var(--font);
+	font-size: 15px;
+	color: var(--text);
+	background: var(--bg);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+	-webkit-text-size-adjust: 100%;
+}
+
+.card {
+	width: min(100%, 360px);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+	padding: 28px 24px 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+h1 {
+	margin: 0;
+	font-size: 24px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+p {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 14px;
+}
+
+form {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+label {
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+input {
+	width: 100%;
+	font: inherit;
+	font-size: 16px;
+	color: var(--text);
+	background: var(--bg-input);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 10px 12px;
+	outline: none;
+	-webkit-appearance: none;
+	appearance: none;
+}
+
+input:focus {
+	border-color: var(--accent);
+}
+
+input.wrong {
+	border-color: var(--danger);
+	animation: shake 0.3s ease;
+}
+
+button {
+	font: inherit;
+	font-weight: 600;
+	color: var(--accent-contrast);
+	background: var(--accent);
+	border: 0;
+	border-radius: var(--radius-sm);
+	padding: 11px 14px;
+	cursor: pointer;
+	touch-action: manipulation;
+}
+
+button:hover {
+	background: var(--accent-strong);
+}
+
+button:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+	box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent);
+}
+
+.error {
+	color: var(--danger);
+	font-size: 13px;
+	min-height: 18px;
+}
+
+.version {
+	font-size: 12px;
+	color: var(--text-muted);
+	text-align: center;
+}
+
+@keyframes shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	25% {
+		transform: translateX(-6px);
+	}
+	75% {
+		transform: translateX(6px);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	input.wrong {
+		animation: none;
+	}
+}
+</style>
+</head>
+<body>
+<main class="card">
+	<h1>SMServer</h1>
+	<p>Enter the password configured in the SMServer app on your iPhone.</p>
+	<form id="login-form" autocomplete="on">
+		<label for="password">Password</label>
+		<input id="password" name="password" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus required>
+		<div id="error" class="error" role="alert" aria-live="assertive"></div>
+		<button id="submit" type="submit">Sign in</button>
+	</form>
+	<div id="version" class="version"></div>
+</main>
+<script>
+(() => {
+	const config = window.SMSERVER_CONFIG && typeof window.SMSERVER_CONFIG === "object" ? window.SMSERVER_CONFIG : {};
+	const apiBase = typeof config.api_base === "string" && config.api_base ? config.api_base.replace(/\/+$/, "") : "/api/v1";
+	const debug = Boolean(config.debug);
+	const form = document.getElementById("login-form");
+	const passwordInput = document.getElementById("password");
+	const errorNode = document.getElementById("error");
+	const submitButton = document.getElementById("submit");
+	const versionNode = document.getElementById("version");
+
+	function log(event, fields) {
+		if (debug) {
+			console.log("[smserver] event=" + event, fields === undefined ? {} : fields);
+		}
+	}
+
+	function logError(event, error, fields) {
+		console.error("[smserver] event=" + event, error === undefined ? null : error, fields === undefined ? {} : fields);
+	}
+
+	function showError(message) {
+		errorNode.textContent = message;
+		passwordInput.classList.remove("wrong");
+		void passwordInput.offsetWidth;
+		passwordInput.classList.add("wrong");
+		passwordInput.value = "";
+		passwordInput.focus();
+	}
+
+	function setBusy(busy) {
+		submitButton.disabled = busy;
+		passwordInput.readOnly = busy;
+		submitButton.textContent = busy ? "Signing in…" : "Sign in";
+	}
+
+	async function readErrorMessage(response) {
+		try {
+			const payload = await response.json();
+			if (payload && payload.error && typeof payload.error.message === "string") {
+				return payload.error.message;
 			}
-		</script>
-	</head>
-	<body>
-		<div class="container">
-			<div class="centered_box">
-				<h1>SMServer</h1>
-				<input class="pass_box" placeholder="Password here" id="input" onKeyDown="if (event.keyCode==13) submitPassword();" autofocus type="password"><br>
-				<button onclick="submitPassword()">⇢</button>
-			</div>
-		</div>
-	</body>
+		} catch (error) {
+			return "";
+		}
+		return "";
+	}
+
+	async function login(password) {
+		const response = await fetch(apiBase + "/auth/login", {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json" },
+			body: JSON.stringify({ password }),
+			credentials: "same-origin",
+			cache: "no-store"
+		});
+		if (response.status === 401) {
+			return { ok: false, message: "Wrong password" };
+		}
+		if (!response.ok) {
+			const message = await readErrorMessage(response);
+			return { ok: false, message: message || "Login failed (" + response.status + ")" };
+		}
+		return { ok: true };
+	}
+
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		const password = passwordInput.value;
+		if (!password) {
+			showError("Enter your password");
+			return;
+		}
+		errorNode.textContent = "";
+		setBusy(true);
+		log("login.start", {});
+		try {
+			const result = await login(password);
+			if (result.ok) {
+				log("login.ok", {});
+				location.replace("/");
+				return;
+			}
+			showError(result.message);
+		} catch (error) {
+			logError("login.network", error, {});
+			showError("Could not reach the server");
+		} finally {
+			setBusy(false);
+		}
+	});
+
+	passwordInput.addEventListener("input", () => {
+		passwordInput.classList.remove("wrong");
+		errorNode.textContent = "";
+	});
+
+	versionNode.textContent = typeof config.version === "string" && config.version ? "SMServer " + config.version : "";
+	passwordInput.focus();
+})();
+</script>
+</body>
 </html>

@@ -26,7 +26,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 	func sceneWillEnterForeground(_ scene: UIScene) {}
 
 	func sceneDidEnterBackground(_ scene: UIScene) {
-		if !(UserDefaults.standard.object(forKey: "backgrounding_enabled") as? Bool ?? true) {
+		if !(UserDefaults.standard.object(forKey: "enable_backgrounding") as? Bool ?? true) {
 			contentView.enteredBackground()
 		}
 	}

@@ -1,13 +1,25 @@
-#!/bin/bash
+#!/var/jb/bin/sh
 set -e
+export PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/usr/bin:/bin:/usr/sbin:/sbin
 dir="/var/jb/Applications/SMServer.app"
+ipc_dir="/var/mobile/Library/SMServer"
+log() { echo "[smserver-postinst] $*"; }
 [ -d "$dir" ] || mkdir -p "$dir"
-if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
-  pass=$(openssl rand -base64 24)
+identity_valid=0
+if [ -s "${dir}/smserver_cert_pass.txt" ] && [ -s "${dir}/identity.pfx" ]; then
+  if openssl pkcs12 -in "${dir}/identity.pfx" -passin file:"${dir}/smserver_cert_pass.txt" -noout >/dev/null 2>&1 || \
+     openssl pkcs12 -legacy -in "${dir}/identity.pfx" -passin file:"${dir}/smserver_cert_pass.txt" -noout >/dev/null 2>&1; then
+    identity_valid=1
+  fi
+fi
+log "event=cert_check valid=${identity_valid}"
+if [ "${identity_valid}" -ne 1 ]; then
+  log "event=cert_generate dir=${dir}"
+  pass=$(openssl rand -hex 16)
   openssl req -x509 -newkey rsa:4096 \
     -keyout "${dir}/key.pem" -out "${dir}/cert.pem" \
     -days 9999 -nodes \
-    -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
+    -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com" >/dev/null 2>&1
   openssl x509 -outform der -in "${dir}/cert.pem" -out "${dir}/cert.der"
   openssl pkcs12 -export \
     -out "${dir}/identity.pfx" \
@@ -17,9 +29,16 @@ if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
     -out "${dir}/identity.pfx" \
     -inkey "${dir}/key.pem" -in "${dir}/cert.pem" \
     -password pass:"${pass}"
-  rm "${dir}/key.pem" "${dir}/cert.pem"
-  echo -n "${pass}" > "${dir}/smserver_cert_pass.txt"
+  rm -f "${dir}/key.pem" "${dir}/cert.pem"
+  printf '%s' "${pass}" > "${dir}/smserver_cert_pass.txt"
+  log "event=cert_generated"
 fi
+chmod 0644 "${dir}/cert.der" "${dir}/identity.pfx" "${dir}/smserver_cert_pass.txt"
+mkdir -p "${ipc_dir}"
+chown mobile:mobile "${ipc_dir}"
+chmod 0700 "${ipc_dir}"
+log "event=ipc_dir_ready path=${ipc_dir}"
 [ -d /var/jb/var/tmp/com.ianwelker.smserver ] || mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
-/var/jb/usr/bin/uicache -p "/var/jb/Applications/SMServer.app" || true
-/var/jb/usr/bin/killall -9 SpringBoard || true
+uicache -p "${dir}" || log "event=uicache_failed"
+log "event=app_registered"
+exit 0

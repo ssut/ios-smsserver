@@ -7,104 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-tweak:
-    name: Build libsmserver tweak deb
-    runs-on: ubuntu-latest
-
-    env:
-      THEOS: /home/runner/theos
-      MRYIPC_SHA: 77ea5ede76ef7a8b462d9661aeaef7e15f2dfa8c
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get install -y build-essential fakeroot rsync curl perl zip git \
-            libxml2 libtinfo6 libplist-utils
-
-      - name: Cache Theos + toolchain + SDKs
-        uses: actions/cache@v4
-        id: theos-cache
-        with:
-          path: /home/runner/theos
-          key: theos-home-v1
-
-      - name: Install Theos
-        if: steps.theos-cache.outputs.cache-hit != 'true'
-        run: git clone --recursive https://github.com/theos/theos.git $THEOS
-
-      - name: Run update-theos
-        if: steps.theos-cache.outputs.cache-hit != 'true'
-        run: $THEOS/bin/update-theos
-
-      - name: Download Linux toolchain
-        if: steps.theos-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p $THEOS/toolchain
-          wget -q https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.3.0/swift-5.8-ubuntu22.04.tar.xz \
-            -O /tmp/toolchain.tar.xz
-          tar -xf /tmp/toolchain.tar.xz -C $THEOS/toolchain
-
-      - name: Download iOS 16.5 SDK
-        if: steps.theos-cache.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://github.com/theos/sdks/archive/master.zip -O /tmp/sdks.zip
-          unzip -q /tmp/sdks.zip -d /tmp/sdks
-          mv /tmp/sdks/sdks-master/*.sdk $THEOS/sdks/
-
-      - name: Install libMRYIPC
-        run: |
-          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/MRYIPCCenter.h" \
-            -o $THEOS/include/MRYIPCCenter.h
-          echo "110cbf88744028bdc41cb4e603370440fa49c6a1eaf0a403c538476b1a0a2d8e  $THEOS/include/MRYIPCCenter.h" | sha256sum -c
-
-          mkdir -p $THEOS/lib/iphone/rootless
-          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/usr/lib/libmryipc.dylib" \
-            -o $THEOS/lib/libmryipc.dylib
-          echo "e1f2412e48cc72cc3754fbf751f176a105be8de386debb34a6b4fbca63700b26  $THEOS/lib/libmryipc.dylib" | sha256sum -c
-
-          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
-          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
-
-      - name: Build tweak deb
-        run: |
-          export THEOS=/home/runner/theos
-          export THEOS_MAKE_PATH=/home/runner/theos/makefiles
-          export PATH="/home/runner/theos/bin:$PATH"
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "$VERSION" | grep -q '^[0-9]' || VERSION=$(grep '^Version:' libsmserver/control | awk '{print $2}')
-          cd libsmserver
-          make package \
-            THEOS=/home/runner/theos \
-            THEOS_MAKE_PATH=/home/runner/theos/makefiles \
-            ARCHS="arm64 arm64e" \
-            TARGET="iphone:clang:16.5" \
-            THEOS_PACKAGE_SCHEME=rootless \
-            FINALPACKAGE=1 \
-            PACKAGE_VERSION="$VERSION"
-
-      - name: Find built deb
-        id: find_deb
-        run: |
-          DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
-          echo "deb_path=$DEB" >> $GITHUB_OUTPUT
-          echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
-          echo "Found: $DEB"
-
-      - name: Upload tweak deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.find_deb.outputs.deb_name }}
-          path: ${{ steps.find_deb.outputs.deb_path }}
-
-  build-app:
-    name: Build SMServer app deb
+  build:
+    name: Build rootless debs
     runs-on: macos-14
-
-    env:
-      MRYIPC_SHA: 77ea5ede76ef7a8b462d9661aeaef7e15f2dfa8c
 
     steps:
       - name: Checkout
@@ -112,130 +17,43 @@ jobs:
 
       - name: Select Xcode
         run: |
-          if [ -d /Applications/Xcode_16.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
-          else
-            XCODE=$(ls /Applications | grep -E '^Xcode.*\.app$' | sort -V | tail -1)
-            sudo xcode-select -s "/Applications/${XCODE}/Contents/Developer"
-          fi
+          XCODE=$(ls /Applications | grep -E '^Xcode.*\.app$' | sort -V | tail -1)
+          sudo xcode-select -s "/Applications/${XCODE}/Contents/Developer"
           xcodebuild -version
 
       - name: Install dependencies
         run: |
-          brew install ldid dpkg
-          sudo gem install cocoapods --no-document
-          echo "$(ruby -e 'puts Gem.bindir')" >> $GITHUB_PATH
+          brew install ldid cocoapods
+          git clone --quiet --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
 
-      - name: Generate TLS certificate + IdentityPass.swift
+      - name: Apply tag version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          cd src
-          PASS=$(openssl rand -base64 24)
-          openssl req -x509 -newkey rsa:4096 \
-            -keyout key.pem -out cert.pem \
-            -days 9999 -nodes \
-            -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
-          openssl x509 -outform der -in cert.pem -out SMServer/cert.der
-          openssl pkcs12 -export \
-            -out SMServer/identity.pfx \
-            -inkey key.pem -in cert.pem \
-            -password pass:"${PASS}" \
-            -legacy 2>/dev/null || \
-          openssl pkcs12 -export \
-            -out SMServer/identity.pfx \
-            -inkey key.pem -in cert.pem \
-            -password pass:"${PASS}"
-          rm key.pem cert.pem
-          printf 'class PKCS12Identity {\n\tstatic let pass: String = "%s"\n}' "${PASS}" \
-            > SMServer/shared/IdentityPass.swift
-
-      - name: Pod install
-        run: |
-          cd src
-          pod install --repo-update
-
-      - name: Build & archive (no code signing)
-        run: |
-          cd src
-          xcodebuild clean archive \
-            -workspace SMServer.xcworkspace \
-            -scheme SMServer \
-            -archivePath ../package/SMServer.xcarchive \
-            -destination "generic/platform=iOS" \
-            ARCHS="arm64" \
-            EXCLUDED_ARCHS="arm64e" \
-            ONLY_ACTIVE_ARCH=NO \
-            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
-          test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
-
-      - name: Fix libmryipc and sign all binaries
-        run: |
-          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-
-          # Download the correct libmryipc (same pinned SHA as the tweak uses)
-          curl -fsSL "https://raw.githubusercontent.com/Muirey03/MRYIPC/${MRYIPC_SHA}/usr/lib/libmryipc.dylib" \
-            -o /tmp/libmryipc.dylib
-          echo "e1f2412e48cc72cc3754fbf751f176a105be8de386debb34a6b4fbca63700b26  /tmp/libmryipc.dylib" | shasum -a 256 -c
-
-          # Extract arm64 slice (the app is arm64 only)
-          lipo /tmp/libmryipc.dylib -thin arm64 -output "${APP}/Frameworks/libmryipc.dylib"
-
-          # Fix the install name to use @rpath
-          install_name_tool -id @rpath/libmryipc.dylib "${APP}/Frameworks/libmryipc.dylib"
-
-          # Fix the main binary's reference to libmryipc
-          install_name_tool -change /usr/lib/libmryipc.dylib @rpath/libmryipc.dylib "${APP}/SMServer"
-
-          # Sign everything
-          ldid -Ssrc/app.entitlements "${APP}/SMServer"
-          for fw in "${APP}"/Frameworks/*.framework/; do
-            name=$(basename "$fw" .framework)
-            if [ -f "$fw/$name" ]; then
-              ldid -S "$fw/$name"
-            fi
-          done
-          ldid -S "${APP}/Frameworks/libmryipc.dylib"
-          echo "All binaries signed"
-
-      - name: Build app deb
-        run: |
-          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-          DEB=package/app_deb
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "$VERSION" | grep -q '^[0-9]' || VERSION=$(grep '^Version:' package/DEBIAN/control | awk '{print $2}')
+          sed -i '' "s/^Version:.*/Version: ${VERSION}/" libsmserver/control package/DEBIAN/control
+          echo "event=version_applied version=${VERSION}"
 
-          sed -i '' "s/^Version:.*/Version: ${VERSION}/" package/DEBIAN/control
+      - name: Build
+        run: |
+          export THEOS="$HOME/theos"
+          ./package/build-rootless.sh
 
-          mkdir -p "${DEB}/var/jb/Applications"
-          cp -r "$APP" "${DEB}/var/jb/Applications/SMServer.app"
-
-          cp -r package/DEBIAN "${DEB}/DEBIAN"
-          chmod 755 "${DEB}/DEBIAN/postinst" "${DEB}/DEBIAN/postrm"
-
-          DEB_NAME="SMServer_${VERSION}_iphoneos-arm64.deb"
-          dpkg-deb --build "${DEB}" "package/${DEB_NAME}"
-          echo "DEB_NAME=${DEB_NAME}" >> $GITHUB_ENV
-          echo "Built: $(ls -lh package/${DEB_NAME})"
-
-      - name: Upload app deb
+      - name: Upload debs
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.DEB_NAME }}
-          path: package/${{ env.DEB_NAME }}
+          name: smserver-rootless-debs
+          path: package/out/*.deb
 
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-tweak, build-app]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -244,15 +62,14 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "SMServer ${{ github.ref_name }} – rootless iOS 16"
+          name: "SMServer ${{ github.ref_name }} – rootless iOS 15/16"
           body: |
-            ## SMServer – rootless iOS 16 + RootHide
+            ## SMServer – rootless iOS 15/16 (Dopamine / palera1n)
 
-            ### Installation order (important!)
-            1. Install `libsmserver` `.deb` first
-            2. Install `SMServer` `.deb`
-            3. Respring
-            4. Open the Messages app once before using SMServer in the browser
+            1. Install the `com.janshai.libsmserver` deb
+            2. Install the `com.ianwelker.smserver` deb (its postinst resprings)
+            3. On Dopamine, make sure every installed Mach-O is in the jailbreak trust cache (`package/device-install.sh` does this)
+            4. Open SMServer and start the server
           files: artifacts/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

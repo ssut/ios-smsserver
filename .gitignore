@@ -17,3 +17,8 @@ src/Pods/**
 
 package/deb/Library/MobileSubstrate/DynamicLibraries/libsmserver.dylib
 package/deb/Library/MobileSubstrate/DynamicLibraries/libsmserver.plist
+
+libsmserver/.theos/
+libsmserver/packages/
+package/out/
+package/.work/

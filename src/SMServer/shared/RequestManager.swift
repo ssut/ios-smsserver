@@ -33,10 +33,18 @@ class RequestManager {
 					self.handleAttachmentData(msg)
 				case .SendTyping:
 					self.handleTyping(msg)
+				case .Ping:
+					self.handlePing(msg)
 				default:
 					Const.log("Enum variant \(msg.command) should never be sent to the host")
 			}
 		}
+	}
+
+	func handlePing(_ msg: SocketMessage) {
+		let response = SocketMessage(msg.id, command: .Pong, data: ["server_time": Const.unixNow()], incoming: false)
+		Const.log("event=remote.ping id=\(msg.id ?? "")")
+		StarscreamDelegate.sharedDelegate.sendData(data: response.json())
 	}
 
 	func handleJsonRequest(_ msg: SocketMessage) {
@@ -219,7 +227,10 @@ let str_to_command: [String:APICommand] = [
 	"typing": .Typing,
 	"new-message": .NewMessage,
 	"battery-status": .BatteryStatus,
-	"read-message": .ReadMessage
+	"read-message": .ReadMessage,
+	"hello": .Hello,
+	"ping": .Ping,
+	"pong": .Pong
 ]
 
 class SocketRequest {
@@ -251,4 +262,7 @@ enum APICommand {
 	case NewMessage
 	case BatteryStatus
 	case ReadMessage
+	case Hello
+	case Ping
+	case Pong
 }
